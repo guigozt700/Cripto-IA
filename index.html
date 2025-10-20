@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WorkConnection - Criptografia AES</title>
+<style>
+  body {
+    background: #f9f9f9;
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    color: #222;
+  }
+  /* Topbar */
+  .topbar {
+    background: #d86b6b;
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: white;
+  }
+  .topbar .logo {
+    font-weight: bold;
+    font-size: 18px;
+  }
+  /* Container */
+  .container {
+    max-width: 800px;
+    margin: 40px auto;
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 5px 25px rgba(0,0,0,0.08);
+    padding: 24px;
+  }
+  h1 {
+    font-size: 22px;
+    color: #333;
+  }
+  label {
+    display: block;
+    font-weight: 600;
+    margin-top: 16px;
+  }
+  textarea, input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px;
+    margin-top: 6px;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    font-family: inherit;
+  }
+  button {
+    background: #d86b6b;
+    border: none;
+    color: white;
+    padding: 10px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    margin-top: 16px;
+    margin-right: 8px;
+  }
+  button:hover {
+    background: #c55c5c;
+  }
+  .secondary {
+    background: #666;
+  }
+  .secondary:hover {
+    background: #555;
+  }
+  .output {
+    background: #f4f4f4;
+    border-radius: 8px;
+    padding: 12px;
+    margin-top: 10px;
+    font-family: monospace;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+  footer {
+    text-align: center;
+    margin-top: 30px;
+    color: #777;
+    font-size: 14px;
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">WorkConnection</div>
+  <div>Criptografia AES-GCM</div>
+</div>
+
+<div class="container">
+  <h1>Criptografar e Descriptografar Mensagens</h1>
+  <p>Use uma senha forte e veja como o AES-GCM funciona diretamente no navegador.</p>
+
+  <label for="message">Mensagem</label>
+  <textarea id="message" rows="4" placeholder="Digite a mensagem...">mensagem secreta</textarea>
+
+  <label for="password">Senha</label>
+  <input type="password" id="password" placeholder="Digite uma senha segura">
+
+  <div>
+    <button id="encryptBtn">Criptografar</button>
+    <button id="decryptBtn" class="secondary">Descriptografar</button>
+  </div>
+
+  <label>Resultado</label>
+  <div id="result" class="output">—</div>
+</div>
+
+<footer>
+  <p>Este exemplo usa a <strong>Web Crypto API</strong> com AES-GCM e PBKDF2 para derivar a chave da senha.</p>
+</footer>
+
+<script>
+// Funções auxiliares
+function toBase64(u8) { return btoa(String.fromCharCode(...u8)); }
+function fromBase64(b64) {
+  const bin = atob(b64);
+  const u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return u8;
+}
+function randomBytes(len) {
+  const b = new Uint8Array(len);
+  crypto.getRandomValues(b);
+  return b;
+}
+
+// Deriva uma chave AES a partir da senha
+async function deriveKey(password, salt) {
+  const enc = new TextEncoder();
+  const baseKey = await crypto.subtle.importKey(
+    "raw", enc.encode(password), "PBKDF2", false, ["deriveKey"]
+  );
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt, iterations: 200000, hash: "SHA-256" },
+    baseKey, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]
+  );
+}
+
+// Criptografa texto -> retorna Base64(salt + iv + ciphertext)
+async function encryptText(plaintext, password) {
+  const enc = new TextEncoder();
+  const salt = randomBytes(16);
+  const iv = randomBytes(12);
+  const key = await deriveKey(password, salt);
+  const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, enc.encode(plaintext));
+  const ct = new Uint8Array(encrypted);
+  const total = new Uint8Array(salt.length + iv.length + ct.length);
+  total.set(salt);
+  total.set(iv, salt.length);
+  total.set(ct, salt.length + iv.length);
+  return toBase64(total);
+}
+
+// Descriptografa Base64 -> texto original
+async function decryptText(base64, password) {
+  const data = fromBase64(base64);
+  const salt = data.slice(0, 16);
+  const iv = data.slice(16, 28);
+  const ciphertext = data.slice(28);
+  const key = await deriveKey(password, salt);
+  const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
+  return new TextDecoder().decode(decrypted);
+}
+
+// Elementos da interface
+const msgEl = document.getElementById("message");
+const passEl = document.getElementById("password");
+const resultEl = document.getElementById("result");
+const encBtn = document.getElementById("encryptBtn");
+const decBtn = document.getElementById("decryptBtn");
+
+// Criptografar
+encBtn.addEventListener("click", async () => {
+  const msg = msgEl.value.trim();
+  const pass = passEl.value;
+  if (!msg || !pass) {
+    resultEl.textContent = "⚠️ Informe mensagem e senha!";
+    return;
+  }
+  resultEl.textContent = "Criptografando...";
+  try {
+    const encrypted = await encryptText(msg, pass);
+    resultEl.textContent = encrypted;
+  } catch (e) {
+    resultEl.textContent = "Erro: " + e.message;
+  }
+});
+
+// função de utilidade para validar Base64 e tamanho mínimo
+function isValidBase64(str) {
+  try {
+    // check basic base64 charset (inclui = padding)
+    if (!/^([A-Za-z0-9+/=\\s]+)$/.test(str)) return false;
+    // try decode
+    const u = fromBase64(str.trim());
+    return u && u.length >= 28; // precisa ter pelo menos 16(salt)+12(iv)
+  } catch (e) {
+    return false;
+  }
+}
+
+async function decryptTextWithChecks(base64, password) {
+  if (!base64 || !password) throw new Error('Forneça o texto cifrado e a senha.');
+
+  const b64 = base64.trim();
+  if (!isValidBase64(b64)) throw new Error('Formato inválido: certifique-se de colar a string Base64 gerada pelo botão "Criptografar".');
+
+  const data = fromBase64(b64);
+  if (data.length < 28) throw new Error('Dados cifrados muito curtos. Deveriam conter salt(16) + iv(12) + ciphertext.');
+
+  const salt = data.slice(0, 16);
+  const iv = data.slice(16, 28);
+  const ciphertext = data.slice(28);
+
+  try {
+    const key = await deriveKey(password, salt);
+    const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
+    return new TextDecoder().decode(decrypted);
+  } catch (err) {
+    // mensagens mais amigáveis dependendo do tipo de erro
+    const msg = (err && err.message) ? err.message : String(err);
+    // Quando a autenticação falha, normalmente é "OperationError" ou "The operation failed".
+    throw new Error('Falha na descriptografia — senha incorreta ou dados corrompidos. (detalhe: ' + msg + ')');
+  }
+}
+
+// listener do botão "Descriptografar" (substitui o antigo)
+decBtn.addEventListener("click", async () => {
+  const cipher = msgEl.value.trim();
+  const pass = passEl.value;
+  if (!cipher || !pass) {
+    resultEl.textContent = "⚠️ Informe texto cifrado e senha!";
+    return;
+  }
+  resultEl.textContent = "Descriptografando...";
+  try {
+    const plain = await decryptTextWithChecks(cipher, pass);
+    resultEl.textContent = plain;
+  } catch (e) {
+    // exibe mensagem amigável e também escreve no console para debug
+    resultEl.textContent = "Erro: " + e.message;
+    console.error('Erro ao descriptografar:', e);
+  }
+});
+
+</script>
+</body>
+</html>
